@@ -1,0 +1,7 @@
+# Data directories
+data/raw/
+data/processed/
+
+# SQLite databases
+*.sqlite
+*.db
