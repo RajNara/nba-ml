@@ -5,3 +5,6 @@ data/processed/
 # SQLite databases
 *.sqlite
 *.db
+
+# Python cache files
+__pycache__/
