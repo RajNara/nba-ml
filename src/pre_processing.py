@@ -59,7 +59,6 @@ def pre_processing_data(df):
     feature_cols = ['home_win_rate', 'away_win_rate', 'home_avg_pts', 'away_avg_pts']
 
     df = df[feature_cols + ['target_home_team_win']]
-    print(df)
     return df
 
 def get_rolling_season_stats(history, season_id):
