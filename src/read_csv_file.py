@@ -3,7 +3,7 @@ import pandas as pd
 
 # Get the absolute path to the project root
 SCRIPT_DIR = Path(__file__).parent
-PROJECT_ROOT = SCRIPT_DIR.parent.parent
+PROJECT_ROOT = SCRIPT_DIR.parent
 DATA_PATH = PROJECT_ROOT / "data" / "raw" / "csv" / "game.csv"
 
 def read_csv_file() -> pd.DataFrame:
