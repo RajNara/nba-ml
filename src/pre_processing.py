@@ -56,7 +56,9 @@ def pre_processing_data(df):
     df['home_avg_pts'] = home_avg_pts
     df['away_avg_pts'] = away_avg_pts
 
-    feature_cols = ['home_win_rate', 'away_win_rate', 'home_avg_pts', 'away_avg_pts']
+    df = normalize_features(df)
+
+    feature_cols = ['home_win_rate', 'away_win_rate', 'home_avg_points_normalized', 'away_avg_pts_normalized']
 
     df = df[feature_cols + ['target_home_team_win']]
     return df
@@ -72,3 +74,13 @@ def get_rolling_season_stats(history, season_id):
         win_pct = np.mean([game['win'] for game in recent_games])
         avg_points = np.mean([game['points'] for game in recent_games])
         return win_pct, avg_points
+    
+def normalize_features(df):
+    # calculate season average
+    season_average = df.groupby('season_id')[['home_avg_pts', 'away_avg_pts']].transform('mean')
+
+    df['home_avg_points_normalized'] = df['home_avg_pts'] / season_average['home_avg_pts']
+    df['away_avg_pts_normalized'] = df['away_avg_pts'] / season_average['away_avg_pts']
+
+    df = df.drop(columns=['home_avg_pts', 'away_avg_pts'])
+    return df
