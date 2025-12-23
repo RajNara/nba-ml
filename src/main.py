@@ -4,12 +4,13 @@ from train_model import train_model
 
 def main():
     # loading data
-    print("Loading data...")
-    data = read_csv_file()
+    print("Loading game data...")
+    game_data = read_csv_file("game.csv")
+    inactive_players_data = read_csv_file("inactive_players.csv")
 
     # preprocess data
     print("Preprocessing data...")
-    data = pre_processing_data(data)
+    data = pre_processing_data(game_data, inactive_players_data)
 
     # train
     print("Training model...")

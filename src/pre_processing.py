@@ -1,10 +1,11 @@
 import pandas as pd
 import numpy as np
+from query_nba_api import fetch_nba_player_stats
 
 # Number of recent games to use when computing rolling statistics
 ROLLING_WINDOW = 10
 
-def pre_processing_data(df):
+def pre_processing_data(game_data_df, inactive_players_df):
     """
     Main preprocessing pipeline.
     Filters to regular season games since 2000
@@ -14,19 +15,19 @@ def pre_processing_data(df):
     Returns a dataframe containing selected features + target.
     """
     # Keep only regular season games (case-insensitive match)
-    df = df[df['season_type'].str.contains('regular season', case=False)]
+    game_data_df = game_data_df[game_data_df['season_type'].str.contains('regular season', case=False)]
 
     # Remove games before 2000
-    df = df[df['game_date'] > '2000-01-01']
+    game_data_df = game_data_df[game_data_df['game_date'] > '2000-01-01']
 
     # Ensure chronological order for rolling computations
-    df = df.sort_values(by='game_date').reset_index(drop=True)
+    game_data_df = game_data_df.sort_values(by='game_date').reset_index(drop=True)
 
     # Binary target: 1 if home team won, 0 otherwise
-    df['target_home_team_win'] = (df['wl_home'] == 'W').astype(int)
+    game_data_df['target_home_team_win'] = (game_data_df['wl_home'] == 'W').astype(int)
 
     # Add columns for rest days for both teams
-    df = calculate_rest_days(df)
+    game_data_df = calculate_rest_days(game_data_df)
 
     # initialize per-team history store and lists to collect per-row features
     team_history = {}
@@ -36,7 +37,7 @@ def pre_processing_data(df):
     away_avg_pts = []
 
     # Iterate rows chronologically and compute rolling stats from prior games
-    for index, row in df.iterrows():
+    for index, row in game_data_df.iterrows():
         home_team = row['team_abbreviation_home']
         away_team = row['team_abbreviation_away']
         current_season = row['season_id']
@@ -75,13 +76,13 @@ def pre_processing_data(df):
         })
 
     # Attach the computed rolling features back to the dataframe
-    df['home_win_rate'] = home_win_rate
-    df['away_win_rate'] = away_win_rate
-    df['home_avg_pts'] = home_avg_pts
-    df['away_avg_pts'] = away_avg_pts
+    game_data_df['home_win_rate'] = home_win_rate
+    game_data_df['away_win_rate'] = away_win_rate
+    game_data_df['home_avg_pts'] = home_avg_pts
+    game_data_df['away_avg_pts'] = away_avg_pts
 
     # Normalize average points relative to season averages and drop raw avg columns
-    df = normalize_features(df)
+    game_data_df = normalize_features(game_data_df)
 
     # Select final feature columns and the target
     feature_cols = [
@@ -93,8 +94,8 @@ def pre_processing_data(df):
         'away_rest_days'
     ]
 
-    df = df[feature_cols + ['target_home_team_win']]
-    return df
+    game_data_df = game_data_df[feature_cols + ['target_home_team_win']]
+    return game_data_df
 
 
 def get_rolling_season_stats(history, season_id):
@@ -116,7 +117,6 @@ def get_rolling_season_stats(history, season_id):
         win_pct = np.mean([game['win'] for game in recent_games])
         avg_points = np.mean([game['points'] for game in recent_games])
         return win_pct, avg_points
-    
 
 
 def normalize_features(df):
@@ -178,3 +178,6 @@ def calculate_rest_days(df):
                     how='left').rename(columns={'days_since_last_game': 'away_rest_days'})
     
     return df
+
+
+# def star_players_injured(df)
