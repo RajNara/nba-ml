@@ -35,5 +35,5 @@ def fetch_nba_player_stats(start_year=2000, end_year=2024):
             print("Error fetching stats for season", season_str, ":", e)
 
 
-    with open('nba_player_stats.json', 'w') as f:
+    with open('../data/raw/nba_player_stats.json', 'w') as f:
         json.dump(top_players_map, f)

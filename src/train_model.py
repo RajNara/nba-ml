@@ -1,7 +1,10 @@
 import pandas as pd
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression, LinearRegression
 from sklearn.ensemble import RandomForestClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.model_selection import GridSearchCV, TimeSeriesSplit
 from sklearn.metrics import accuracy_score, classification_report
+from xgboost import XGBClassifier
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,7 +30,17 @@ def train_model(df):
     # initialize and train the model
     model = LogisticRegression(solver='liblinear', max_iter=1000)
     model.fit(X_train, y_train)
+
     # model = RandomForestClassifier(n_estimators=100, min_samples_leaf=10, random_state=42)
+    # model.fit(X_train, y_train)
+
+    # model = DecisionTreeClassifier()
+    # model.fit(X_train, y_train)
+
+    # model = LinearRegression()
+    # model.fit(X_train, y_train)
+
+    # model = XGBClassifier()
     # model.fit(X_train, y_train)
 
     # evaluate the model
@@ -42,28 +55,43 @@ def train_model(df):
     print("Classification Report:")
     print(classification_report(y_test, predictions))
 
-    # 1. Extract and Sort Feature Importance
-    importances = model.feature_importances_
-    indices = np.argsort(importances) # Sort ascending for horizontal bar chart
 
-    # 2. Create the Plot
-    plt.figure(figsize=(10, 6))
-    plt.title('Feature Importance')
-    plt.barh(range(len(indices)), importances[indices], color='b', align='center')
-    
-    # 3. Add Labels
-    # We map the sorted indices back to the feature names
-    plt.yticks(range(len(indices)), [feature_cols[i] for i in indices])
-    plt.xlabel('Relative Importance')
-    
-    # 4. Save and Show
-    plt.tight_layout()
-    plt.savefig('feature_importance.png') # Saves the image to your folder
-    plt.show()
+    param_grid = {
+        'C': [0.001, 0.01, 0.1, 1, 10, 100],  # "Skepticism" level
+        'penalty': ['l2'],                    # L2 is usually best for sports
+        'solver': ['liblinear', 'lbfgs'],     # Different math engines
+        'class_weight': [None, 'balanced']    # Handle home/away win imbalance
+    }
 
-    # 5. Print the numeric list (Optional)
-    print("\n--- Feature Importance ---")
-    for i in reversed(indices):
-        print(f"{feature_cols[i]}: {importances[i]:.4f}")
+    # 2. Use TimeSeriesSplit (CRITICAL for sports)
+    # This ensures we don't train on 2024 data to predict 2012 games.
+    tscv = TimeSeriesSplit(n_splits=5)
+
+    # 3. Run the Search
+    grid = GridSearchCV(
+        LogisticRegression(max_iter=2000), 
+        param_grid, 
+        cv=tscv, 
+        scoring='accuracy', 
+        n_jobs=-1,
+        verbose=1
+    )
+    
+    print("Tuning Logistic Regression parameters...")
+    grid.fit(X_train, y_train)
+    
+    print(f"  Best Accuracy: {grid.best_score_:.4f}")
+    print(f"  Best Settings: {grid.best_params_}")
+
+    model = grid.best_estimator_
+    
+    # Get the weights
+    coefs = pd.DataFrame({
+        'Feature': feature_cols,
+        'Weight': model.coef_[0]
+    }).sort_values(by='Weight', ascending=False)
+    
+    print("\n--- Model Logic (Coefficients) ---")
+    print(coefs)
 
     return model, accuracy

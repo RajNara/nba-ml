@@ -36,10 +36,6 @@ def pre_processing_data(game_data_df, inactive_players_df):
     game_data_df['home_load_mgmt'] = ((game_data_df['home_stars_out'] > 0) & (game_data_df['home_rest_days'] == 1)).astype(int)
     game_data_df['away_load_mgmt'] = ((game_data_df['away_stars_out'] > 0) & (game_data_df['away_rest_days'] == 1)).astype(int)
 
-    print("--- Feature Counts ---")
-    print("Home Stars Out != 0:", (game_data_df['home_stars_out'] > 0).sum())
-    print("Away Load Mgmt == 1:", (game_data_df['away_load_mgmt'] == 1).sum())
-
     # initialize per-team history store and lists to collect per-row features
     team_history = {}
     home_win_rate = []
@@ -92,19 +88,19 @@ def pre_processing_data(game_data_df, inactive_players_df):
     game_data_df['home_avg_pts'] = home_avg_pts
     game_data_df['away_avg_pts'] = away_avg_pts
 
+    game_data_df['diff_win_rate'] = game_data_df['home_win_rate'] - game_data_df['away_win_rate']
+    game_data_df['diff_rest'] = game_data_df['home_rest_days'] - game_data_df['away_rest_days']
+    game_data_df['diff_stars'] = game_data_df['home_stars_out'] - game_data_df['away_stars_out']
+
     # Normalize average points relative to season averages and drop raw avg columns
     game_data_df = normalize_features(game_data_df)
 
     # Select final feature columns and the target
     feature_cols = [
-        'home_win_rate',
-        'away_win_rate',
-        'home_avg_points_normalized',
-        'away_avg_pts_normalized',
-        'home_rest_days',
-        'away_rest_days',
-        'home_stars_out',
-        'away_stars_out',
+        'diff_win_rate',
+        'diff_avg_points_normalized',
+        'diff_rest',
+        'diff_stars',
         'home_load_mgmt',
         'away_load_mgmt'
     ]
@@ -146,6 +142,8 @@ def normalize_features(df):
     # Normalize by season mean to remove season-to-season scoring inflation
     df['home_avg_points_normalized'] = df['home_avg_pts'] / season_average['home_avg_pts']
     df['away_avg_pts_normalized'] = df['away_avg_pts'] / season_average['away_avg_pts']
+
+    df['diff_avg_points_normalized'] = df['home_avg_points_normalized'] - df['away_avg_pts_normalized']
 
     # Remove raw average point columns (we keep the normalized versions)
     df = df.drop(columns=['home_avg_pts', 'away_avg_pts'])
