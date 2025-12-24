@@ -27,8 +27,9 @@ def fetch_nba_player_stats(start_year=2000, end_year=2024):
             df = df[df['MIN'] > 28.0]
             df = df.sort_values(by='NBA_FANTASY_PTS', ascending=False)
             top_players = df.head(50)
+            season_id_key = f"2{year}"
 
-            top_players_map[f"{season_str}"] = top_players['PLAYER_ID'].tolist()
+            top_players_map[season_id_key] = top_players['PLAYER_ID'].tolist()
             time.sleep(3)  # Add a delay to avoid hitting rate limits
         except Exception as e:
             print("Error fetching stats for season", season_str, ":", e)

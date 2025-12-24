@@ -1,6 +1,10 @@
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, classification_report
+import pandas as pd
+import matplotlib.pyplot as plt
+import numpy as np
 
 def train_model(df):
     # split by time
@@ -23,6 +27,8 @@ def train_model(df):
     # initialize and train the model
     model = LogisticRegression(solver='liblinear', max_iter=1000)
     model.fit(X_train, y_train)
+    # model = RandomForestClassifier(n_estimators=100, min_samples_leaf=10, random_state=42)
+    # model.fit(X_train, y_train)
 
     # evaluate the model
     predictions = model.predict(X_test)
@@ -35,5 +41,29 @@ def train_model(df):
     # classification report
     print("Classification Report:")
     print(classification_report(y_test, predictions))
+
+    # 1. Extract and Sort Feature Importance
+    importances = model.feature_importances_
+    indices = np.argsort(importances) # Sort ascending for horizontal bar chart
+
+    # 2. Create the Plot
+    plt.figure(figsize=(10, 6))
+    plt.title('Feature Importance')
+    plt.barh(range(len(indices)), importances[indices], color='b', align='center')
+    
+    # 3. Add Labels
+    # We map the sorted indices back to the feature names
+    plt.yticks(range(len(indices)), [feature_cols[i] for i in indices])
+    plt.xlabel('Relative Importance')
+    
+    # 4. Save and Show
+    plt.tight_layout()
+    plt.savefig('feature_importance.png') # Saves the image to your folder
+    plt.show()
+
+    # 5. Print the numeric list (Optional)
+    print("\n--- Feature Importance ---")
+    for i in reversed(indices):
+        print(f"{feature_cols[i]}: {importances[i]:.4f}")
 
     return model, accuracy

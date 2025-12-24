@@ -1,3 +1,5 @@
+import json
+import os
 import pandas as pd
 import numpy as np
 from query_nba_api import fetch_nba_player_stats
@@ -28,6 +30,15 @@ def pre_processing_data(game_data_df, inactive_players_df):
 
     # Add columns for rest days for both teams
     game_data_df = calculate_rest_days(game_data_df)
+
+    game_data_df = star_players_injured(game_data_df, inactive_players_df)
+
+    game_data_df['home_load_mgmt'] = ((game_data_df['home_stars_out'] > 0) & (game_data_df['home_rest_days'] == 1)).astype(int)
+    game_data_df['away_load_mgmt'] = ((game_data_df['away_stars_out'] > 0) & (game_data_df['away_rest_days'] == 1)).astype(int)
+
+    print("--- Feature Counts ---")
+    print("Home Stars Out != 0:", (game_data_df['home_stars_out'] > 0).sum())
+    print("Away Load Mgmt == 1:", (game_data_df['away_load_mgmt'] == 1).sum())
 
     # initialize per-team history store and lists to collect per-row features
     team_history = {}
@@ -91,7 +102,11 @@ def pre_processing_data(game_data_df, inactive_players_df):
         'home_avg_points_normalized',
         'away_avg_pts_normalized',
         'home_rest_days',
-        'away_rest_days'
+        'away_rest_days',
+        'home_stars_out',
+        'away_stars_out',
+        'home_load_mgmt',
+        'away_load_mgmt'
     ]
 
     game_data_df = game_data_df[feature_cols + ['target_home_team_win']]
@@ -180,4 +195,70 @@ def calculate_rest_days(df):
     return df
 
 
-# def star_players_injured(df)
+def star_players_injured(df, injured_players_df):
+    if not os.path.exists('../data/raw/nba_player_stats.json'):
+        print('Fetching NBA player stats as json was not found...')
+        fetch_nba_player_stats()
+
+    print('Loading NBA player stats from json...')
+    with open('../data/raw/nba_player_stats.json', 'r') as file:
+        star_players_map = json.load(file)
+
+    def check_if_player_is_star(row):
+        player_id = row['player_id']
+        season_id = str(row['season_id'])
+
+        if season_id in star_players_map:
+            return 1 if player_id in star_players_map[season_id] else 0
+        else:
+            return 0
+        
+    game_season_map = df[['game_id', 'season_id']].drop_duplicates()
+
+    # Inner merge: Only keep injuries that match a game in our dataset
+    injured_w_season = injured_players_df.merge(game_season_map, on='game_id', how='inner')
+
+    # 4. Apply the Star Check
+    injured_w_season['is_star'] = injured_w_season.apply(check_if_player_is_star, axis=1)
+
+    # print(injured_w_season)
+
+    # 5. Filter & Count
+    # We only care about rows where is_star == 1
+    stars_only = injured_w_season[injured_w_season['is_star'] == 1]
+    
+    # Count how many stars are missing per team, per game
+    stars_out_counts = stars_only.groupby(['game_id', 'team_id']).size().reset_index(name='stars_missing')
+
+    # 6. Merge back into the Main DataFrame
+    df = df.merge(stars_out_counts, 
+                    left_on=['game_id', 'team_id_home'], 
+                    right_on=['game_id', 'team_id'], 
+                    how='left',
+                    suffixes=('', '_remove_me')) 
+        
+    df = df.rename(columns={'stars_missing': 'home_stars_out'})
+    
+    # CRITICAL FIX: Drop 'team_id' immediately so it doesn't cause a collision in the next merge
+    # Also drop any columns that got the '_remove_me' suffix
+    drop_cols = [c for c in df.columns if c == 'team_id' or c.endswith('_remove_me')]
+    df = df.drop(columns=drop_cols, errors='ignore')
+    
+    # --- AWAY TEAM MERGE ---
+    df = df.merge(stars_out_counts, 
+                left_on=['game_id', 'team_id_away'], 
+                right_on=['game_id', 'team_id'], 
+                how='left',
+                suffixes=('', '_remove_me'))
+    
+    df = df.rename(columns={'stars_missing': 'away_stars_out'})
+    
+    # Clean up again
+    drop_cols = [c for c in df.columns if c == 'team_id' or c.endswith('_remove_me')]
+    df = df.drop(columns=drop_cols, errors='ignore')
+
+    # 7. Fill NaNs
+    df['home_stars_out'] = df['home_stars_out'].fillna(0)
+    df['away_stars_out'] = df['away_stars_out'].fillna(0)
+
+    return df    
