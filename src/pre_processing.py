@@ -5,7 +5,7 @@ import numpy as np
 from query_nba_api import fetch_nba_player_stats
 
 # Number of recent games to use when computing rolling statistics
-ROLLING_WINDOW = 10
+ROLLING_WINDOW = 41
 
 def pre_processing_data(game_data_df, inactive_players_df):
     """
