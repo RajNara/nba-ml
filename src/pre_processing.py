@@ -18,19 +18,12 @@ def pre_processing_data(game_data_df, inactive_players_df):
     """
     # Keep only regular season games (case-insensitive match)
     game_data_df = game_data_df[game_data_df['season_type'].str.contains('regular season', case=False)]
-
-    # Remove games before 2000
     game_data_df = game_data_df[game_data_df['game_date'] > '2000-01-01']
-
-    # Ensure chronological order for rolling computations
     game_data_df = game_data_df.sort_values(by='game_date').reset_index(drop=True)
-
-    # Binary target: 1 if home team won, 0 otherwise
     game_data_df['target_home_team_win'] = (game_data_df['wl_home'] == 'W').astype(int)
 
     # Add columns for rest days for both teams
     game_data_df = calculate_rest_days(game_data_df)
-
     game_data_df = star_players_injured(game_data_df, inactive_players_df)
 
     game_data_df['home_load_mgmt'] = ((game_data_df['home_stars_out'] > 0) & (game_data_df['home_rest_days'] == 1)).astype(int)
@@ -40,8 +33,8 @@ def pre_processing_data(game_data_df, inactive_players_df):
     team_history = {}
     home_win_rate = []
     away_win_rate = []
-    home_avg_pts = []
-    away_avg_pts = []
+    home_avg_margin = []
+    away_avg_margin = []
 
     # Iterate rows chronologically and compute rolling stats from prior games
     for index, row in game_data_df.iterrows():
@@ -50,18 +43,23 @@ def pre_processing_data(game_data_df, inactive_players_df):
         current_season = row['season_id']
 
         # Ensure each team has an entry in the history dict
-        if home_team not in team_history: team_history[home_team] = []
-        if away_team not in team_history: team_history[away_team] = []
+        if home_team not in team_history:
+            team_history[home_team] = []
+        if away_team not in team_history:
+            team_history[away_team] = []
 
         # Compute rolling stats for this season up to (but not including) this game
-        home_team_win_rate, home_team_avg_pts = get_rolling_season_stats(team_history[home_team], current_season)
-        away_team_win_rate, away_team_avg_pts = get_rolling_season_stats(team_history[away_team], current_season)
+        home_team_win_rate, home_margin = get_rolling_season_stats(team_history[home_team], current_season)
+        away_team_win_rate, away_margin = get_rolling_season_stats(team_history[away_team], current_season)
 
         # Collect computed features for adding to dataframe later
         home_win_rate.append(home_team_win_rate)
         away_win_rate.append(away_team_win_rate)
-        home_avg_pts.append(home_team_avg_pts)
-        away_avg_pts.append(away_team_avg_pts)
+        home_avg_margin.append(home_margin)
+        away_avg_margin.append(away_margin)
+
+        margin_home = row['pts_home'] - row['pts_away']
+        margin_away = row['pts_away'] - row['pts_home']
 
         # Determine outcome of the current game for each team
         is_home_winner = 1 if row['wl_home'] == 'W' else 0
@@ -71,34 +69,31 @@ def pre_processing_data(game_data_df, inactive_players_df):
         team_history[home_team].append({
             'season_id': current_season,
             'win': is_home_winner,
-            'points': row['pts_home'],
-            'opponent': away_team
+            'margin': margin_home
         })
 
         team_history[away_team].append({
             'season_id': current_season,
             'win': is_away_winner,
-            'points': row['pts_away'],
-            'opponent': home_team
+            'margin': margin_away
         })
 
     # Attach the computed rolling features back to the dataframe
     game_data_df['home_win_rate'] = home_win_rate
     game_data_df['away_win_rate'] = away_win_rate
-    game_data_df['home_avg_pts'] = home_avg_pts
-    game_data_df['away_avg_pts'] = away_avg_pts
 
     game_data_df['diff_win_rate'] = game_data_df['home_win_rate'] - game_data_df['away_win_rate']
+    game_data_df['diff_avg_margin'] = np.array(home_avg_margin) - np.array(away_avg_margin)
     game_data_df['diff_rest'] = game_data_df['home_rest_days'] - game_data_df['away_rest_days']
     game_data_df['diff_stars'] = game_data_df['home_stars_out'] - game_data_df['away_stars_out']
 
     # Normalize average points relative to season averages and drop raw avg columns
-    game_data_df = normalize_features(game_data_df)
+    # game_data_df = normalize_features(game_data_df)
 
     # Select final feature columns and the target
     feature_cols = [
         'diff_win_rate',
-        'diff_avg_points_normalized',
+        'diff_avg_margin',
         'diff_rest',
         'diff_stars',
         'home_load_mgmt',
@@ -126,7 +121,7 @@ def get_rolling_season_stats(history, season_id):
         return 0.5, 100.0
     else:
         win_pct = np.mean([game['win'] for game in recent_games])
-        avg_points = np.mean([game['points'] for game in recent_games])
+        avg_points = np.mean([game['margin'] for game in recent_games])
         return win_pct, avg_points
 
 
@@ -141,9 +136,9 @@ def normalize_features(df):
 
     # Normalize by season mean to remove season-to-season scoring inflation
     df['home_avg_points_normalized'] = df['home_avg_pts'] / season_average['home_avg_pts']
-    df['away_avg_pts_normalized'] = df['away_avg_pts'] / season_average['away_avg_pts']
+    df['away_avg_points_normalized'] = df['away_avg_pts'] / season_average['away_avg_pts']
 
-    df['diff_avg_points_normalized'] = df['home_avg_points_normalized'] - df['away_avg_pts_normalized']
+    df['diff_avg_points_normalized'] = df['home_avg_points_normalized'] - df['away_avg_points_normalized']
 
     # Remove raw average point columns (we keep the normalized versions)
     df = df.drop(columns=['home_avg_pts', 'away_avg_pts'])
@@ -194,68 +189,55 @@ def calculate_rest_days(df):
 
 
 def star_players_injured(df, injured_players_df):
-    if not os.path.exists('../data/raw/nba_player_stats.json'):
+    """Count the number of star players out for each team in each game."""
+    stats_path = '../data/raw/nba_player_stats.json'
+    
+    if not os.path.exists(stats_path):
         print('Fetching NBA player stats as json was not found...')
         fetch_nba_player_stats()
 
     print('Loading NBA player stats from json...')
-    with open('../data/raw/nba_player_stats.json', 'r') as file:
+    with open(stats_path, 'r') as file:
         star_players_map = json.load(file)
 
     def check_if_player_is_star(row):
         player_id = row['player_id']
         season_id = str(row['season_id'])
-
-        if season_id in star_players_map:
-            return 1 if player_id in star_players_map[season_id] else 0
-        else:
-            return 0
+        return 1 if season_id in star_players_map and player_id in star_players_map[season_id] else 0
         
     game_season_map = df[['game_id', 'season_id']].drop_duplicates()
 
     # Inner merge: Only keep injuries that match a game in our dataset
     injured_w_season = injured_players_df.merge(game_season_map, on='game_id', how='inner')
 
-    # 4. Apply the Star Check
+    # Apply the star check and filter for stars only
     injured_w_season['is_star'] = injured_w_season.apply(check_if_player_is_star, axis=1)
-
-    # print(injured_w_season)
-
-    # 5. Filter & Count
-    # We only care about rows where is_star == 1
     stars_only = injured_w_season[injured_w_season['is_star'] == 1]
     
     # Count how many stars are missing per team, per game
     stars_out_counts = stars_only.groupby(['game_id', 'team_id']).size().reset_index(name='stars_missing')
 
-    # 6. Merge back into the Main DataFrame
+    # Merge home team star counts
     df = df.merge(stars_out_counts, 
-                    left_on=['game_id', 'team_id_home'], 
-                    right_on=['game_id', 'team_id'], 
-                    how='left',
-                    suffixes=('', '_remove_me')) 
-        
-    df = df.rename(columns={'stars_missing': 'home_stars_out'})
+                  left_on=['game_id', 'team_id_home'], 
+                  right_on=['game_id', 'team_id'], 
+                  how='left',
+                  suffixes=('', '_remove_me')).rename(columns={'stars_missing': 'home_stars_out'})
     
-    # CRITICAL FIX: Drop 'team_id' immediately so it doesn't cause a collision in the next merge
-    # Also drop any columns that got the '_remove_me' suffix
-    drop_cols = [c for c in df.columns if c == 'team_id' or c.endswith('_remove_me')]
-    df = df.drop(columns=drop_cols, errors='ignore')
+    # Drop temporary columns from merge
+    df = df.drop(columns=[c for c in df.columns if c == 'team_id' or c.endswith('_remove_me')], errors='ignore')
     
-    # --- AWAY TEAM MERGE ---
+    # Merge away team star counts
     df = df.merge(stars_out_counts, 
-                left_on=['game_id', 'team_id_away'], 
-                right_on=['game_id', 'team_id'], 
-                how='left',
-                suffixes=('', '_remove_me'))
+                  left_on=['game_id', 'team_id_away'], 
+                  right_on=['game_id', 'team_id'], 
+                  how='left',
+                  suffixes=('', '_remove_me')).rename(columns={'stars_missing': 'away_stars_out'})
     
-    df = df.rename(columns={'stars_missing': 'away_stars_out'})
-    
-    # Clean up again
-    drop_cols = [c for c in df.columns if c == 'team_id' or c.endswith('_remove_me')]
-    df = df.drop(columns=drop_cols, errors='ignore')
+    # Drop temporary columns from merge
+    df = df.drop(columns=[c for c in df.columns if c == 'team_id' or c.endswith('_remove_me')], errors='ignore')
 
-    # 7. Fill NaNs
+    # Fill NaNs with 0 (no stars out)
     df['home_stars_out'] = df['home_stars_out'].fillna(0)
     df['away_stars_out'] = df['away_stars_out'].fillna(0)
 

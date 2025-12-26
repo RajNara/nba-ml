@@ -14,7 +14,7 @@ def main():
 
     # train
     print("Training model...")
-    model, accuracy = train_model(data)
+    train_model(data)
 
     print("Done!")
 
