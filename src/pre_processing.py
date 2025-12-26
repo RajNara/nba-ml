@@ -5,7 +5,8 @@ import numpy as np
 from query_nba_api import fetch_nba_player_stats
 
 # Number of recent games to use when computing rolling statistics
-ROLLING_WINDOW = 41
+ROLLING_WINDOW_LONG = 41
+ROLLING_WINDOW_SHORT = 5
 
 def pre_processing_data(game_data_df, inactive_players_df):
     """
@@ -31,10 +32,7 @@ def pre_processing_data(game_data_df, inactive_players_df):
 
     # initialize per-team history store and lists to collect per-row features
     team_history = {}
-    home_win_rate = []
-    away_win_rate = []
-    home_avg_margin = []
-    away_avg_margin = []
+    features_list = []
 
     # Iterate rows chronologically and compute rolling stats from prior games
     for index, row in game_data_df.iterrows():
@@ -49,14 +47,22 @@ def pre_processing_data(game_data_df, inactive_players_df):
             team_history[away_team] = []
 
         # Compute rolling stats for this season up to (but not including) this game
-        home_team_win_rate, home_margin = get_rolling_season_stats(team_history[home_team], current_season)
-        away_team_win_rate, away_margin = get_rolling_season_stats(team_history[away_team], current_season)
+        home_team_win_rate_long, home_margin_long = get_rolling_season_stats(team_history[home_team], current_season, ROLLING_WINDOW_LONG)
+        away_team_win_rate_long, away_margin_long = get_rolling_season_stats(team_history[away_team], current_season, ROLLING_WINDOW_LONG)
 
-        # Collect computed features for adding to dataframe later
-        home_win_rate.append(home_team_win_rate)
-        away_win_rate.append(away_team_win_rate)
-        home_avg_margin.append(home_margin)
-        away_avg_margin.append(away_margin)
+        home_team_win_rate_short, home_margin_short = get_rolling_season_stats(team_history[home_team], current_season, ROLLING_WINDOW_SHORT)
+        away_team_win_rate_short, away_margin_short = get_rolling_season_stats(team_history[away_team], current_season, ROLLING_WINDOW_SHORT)
+
+        features_list.append({
+            'home_win_rate_long': home_team_win_rate_long,
+            'away_win_rate_long': away_team_win_rate_long,
+            'home_avg_margin_long': home_margin_long,
+            'away_avg_margin_long': away_margin_long,
+            'home_win_rate_short': home_team_win_rate_short,
+            'away_win_rate_short': away_team_win_rate_short,
+            'home_avg_margin_short': home_margin_short,
+            'away_avg_margin_short': away_margin_short
+        })
 
         margin_home = row['pts_home'] - row['pts_away']
         margin_away = row['pts_away'] - row['pts_home']
@@ -78,22 +84,29 @@ def pre_processing_data(game_data_df, inactive_players_df):
             'margin': margin_away
         })
 
-    # Attach the computed rolling features back to the dataframe
-    game_data_df['home_win_rate'] = home_win_rate
-    game_data_df['away_win_rate'] = away_win_rate
+    features_df = pd.DataFrame(features_list)
+    game_data_df = pd.concat([game_data_df, features_df], axis=1)
 
-    game_data_df['diff_win_rate'] = game_data_df['home_win_rate'] - game_data_df['away_win_rate']
-    game_data_df['diff_avg_margin'] = np.array(home_avg_margin) - np.array(away_avg_margin)
+    game_data_df['diff_win_rate_long'] = game_data_df['home_win_rate_long'] - game_data_df['away_win_rate_long']
+    game_data_df['diff_win_rate_short'] = game_data_df['home_win_rate_short'] - game_data_df['away_win_rate_short']
+
+    game_data_df['diff_avg_margin_long'] = game_data_df['home_avg_margin_long'] - game_data_df['away_avg_margin_long']
+    game_data_df['diff_avg_margin_short'] = game_data_df['home_avg_margin_short'] - game_data_df['away_avg_margin_short']
+
+    game_data_df['home_trend'] = game_data_df['home_avg_margin_short'] - game_data_df['home_avg_margin_long']
+    game_data_df['away_trend'] = game_data_df['away_avg_margin_short'] - game_data_df['away_avg_margin_long']
+
     game_data_df['diff_rest'] = game_data_df['home_rest_days'] - game_data_df['away_rest_days']
     game_data_df['diff_stars'] = game_data_df['home_stars_out'] - game_data_df['away_stars_out']
 
-    # Normalize average points relative to season averages and drop raw avg columns
-    # game_data_df = normalize_features(game_data_df)
-
     # Select final feature columns and the target
     feature_cols = [
-        'diff_win_rate',
-        'diff_avg_margin',
+        'diff_win_rate_long',
+        'diff_win_rate_short',
+        'diff_avg_margin_long',
+        'diff_avg_margin_short',
+        'home_trend',
+        'away_trend',
         'diff_rest',
         'diff_stars',
         'home_load_mgmt',
@@ -104,7 +117,7 @@ def pre_processing_data(game_data_df, inactive_players_df):
     return game_data_df
 
 
-def get_rolling_season_stats(history, season_id):
+def get_rolling_season_stats(history, season_id, rolling_window):
     """
     Return (win_pct, avg_points) for the last ROLLING_WINDOW games
     within the same season from the provided history list. If no games are
@@ -114,7 +127,7 @@ def get_rolling_season_stats(history, season_id):
     season_history = [game for game in history if game['season_id'] == season_id]
 
     # Take the most recent ROLLING_WINDOW games
-    recent_games = season_history[-ROLLING_WINDOW:]
+    recent_games = season_history[-rolling_window:]
 
     # Default values for teams with no prior games this season
     if len(recent_games) == 0:
@@ -201,7 +214,10 @@ def star_players_injured(df, injured_players_df):
         star_players_map = json.load(file)
 
     def check_if_player_is_star(row):
-        player_id = row['player_id']
+        try:
+            player_id = int(row['player_id'])
+        except (ValueError, TypeError):
+            return 0
         season_id = str(row['season_id'])
         return 1 if season_id in star_players_map and player_id in star_players_map[season_id] else 0
         
@@ -241,4 +257,4 @@ def star_players_injured(df, injured_players_df):
     df['home_stars_out'] = df['home_stars_out'].fillna(0)
     df['away_stars_out'] = df['away_stars_out'].fillna(0)
 
-    return df    
+    return df
