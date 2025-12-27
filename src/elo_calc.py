@@ -49,11 +49,11 @@ class EloCalculator:
         for team in self.team_ratings:
             self.team_ratings[team] = (self.team_ratings[team] * self.reversion_factor) + (1500 * (1 - self.reversion_factor))
 
-def add_elo_ratings(df):
+def add_elo_ratings(df, k_factor=25, home_advantage=100):
     """
     Iterates through the dataframe chronologically and attaches Elo ratings.
     """
-    tracker = EloCalculator(k_factor=25, home_advantage=75) # Tuned constants
+    tracker = EloCalculator(k_factor=k_factor, home_advantage=home_advantage) # Tuned constants
     
     # Storage for the new columns
     home_elos = []

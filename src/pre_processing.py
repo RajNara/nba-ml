@@ -6,10 +6,12 @@ from query_nba_api import fetch_nba_player_stats
 from elo_calc import add_elo_ratings
 
 # Number of recent games to use when computing rolling statistics
-ROLLING_WINDOW_LONG = 41
-ROLLING_WINDOW_SHORT = 10
+ROLLING_WINDOW_LONG = 40
+ROLLING_WINDOW_SHORT = 15
 
-def pre_processing_data(game_data_df, inactive_players_df):
+def pre_processing_data(game_data_df, inactive_players_df,
+                        window_long=ROLLING_WINDOW_LONG, window_short=ROLLING_WINDOW_SHORT,
+                        k_factor=19, home_advantage=90):
     """
     Main preprocessing pipeline.
     Filters to regular season games since 2000
@@ -27,7 +29,7 @@ def pre_processing_data(game_data_df, inactive_players_df):
     # Add columns for rest days for both teams
     game_data_df = calculate_rest_days(game_data_df)
     game_data_df = star_players_injured(game_data_df, inactive_players_df)
-    game_data_df = add_elo_ratings(game_data_df)
+    game_data_df = add_elo_ratings(game_data_df, k_factor=k_factor, home_advantage=home_advantage)
 
     game_data_df['home_load_mgmt'] = ((game_data_df['home_stars_out'] > 0) & (game_data_df['home_rest_days'] == 1)).astype(int)
     game_data_df['away_load_mgmt'] = ((game_data_df['away_stars_out'] > 0) & (game_data_df['away_rest_days'] == 1)).astype(int)
@@ -49,12 +51,11 @@ def pre_processing_data(game_data_df, inactive_players_df):
             team_history[away_team] = []
 
         # Compute rolling stats for this season up to (but not including) this game
-        home_team_win_rate_long, home_margin_long = get_rolling_season_stats(team_history[home_team], current_season, ROLLING_WINDOW_LONG)
-        away_team_win_rate_long, away_margin_long = get_rolling_season_stats(team_history[away_team], current_season, ROLLING_WINDOW_LONG)
+        home_team_win_rate_long, home_margin_long = get_rolling_season_stats(team_history[home_team], current_season, window_long)
+        away_team_win_rate_long, away_margin_long = get_rolling_season_stats(team_history[away_team], current_season, window_long)
 
-        home_team_win_rate_short, home_margin_short = get_rolling_season_stats(team_history[home_team], current_season, ROLLING_WINDOW_SHORT)
-        away_team_win_rate_short, away_margin_short = get_rolling_season_stats(team_history[away_team], current_season, ROLLING_WINDOW_SHORT)
-
+        home_team_win_rate_short, home_margin_short = get_rolling_season_stats(team_history[home_team], current_season, window_short)
+        away_team_win_rate_short, away_margin_short = get_rolling_season_stats(team_history[away_team], current_season, window_short)
         features_list.append({
             'home_win_rate_long': home_team_win_rate_long,
             'away_win_rate_long': away_team_win_rate_long,
