@@ -3,10 +3,11 @@ import os
 import pandas as pd
 import numpy as np
 from query_nba_api import fetch_nba_player_stats
+from elo_calc import add_elo_ratings
 
 # Number of recent games to use when computing rolling statistics
 ROLLING_WINDOW_LONG = 41
-ROLLING_WINDOW_SHORT = 5
+ROLLING_WINDOW_SHORT = 10
 
 def pre_processing_data(game_data_df, inactive_players_df):
     """
@@ -26,6 +27,7 @@ def pre_processing_data(game_data_df, inactive_players_df):
     # Add columns for rest days for both teams
     game_data_df = calculate_rest_days(game_data_df)
     game_data_df = star_players_injured(game_data_df, inactive_players_df)
+    game_data_df = add_elo_ratings(game_data_df)
 
     game_data_df['home_load_mgmt'] = ((game_data_df['home_stars_out'] > 0) & (game_data_df['home_rest_days'] == 1)).astype(int)
     game_data_df['away_load_mgmt'] = ((game_data_df['away_stars_out'] > 0) & (game_data_df['away_rest_days'] == 1)).astype(int)
@@ -101,6 +103,7 @@ def pre_processing_data(game_data_df, inactive_players_df):
 
     # Select final feature columns and the target
     feature_cols = [
+        'diff_elo',
         'diff_win_rate_long',
         'diff_win_rate_short',
         'diff_avg_margin_long',
